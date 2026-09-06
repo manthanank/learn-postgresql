@@ -1,0 +1,22 @@
+{
+  "name": "learn-postgresql",
+  "version": "1.0.0",
+  "description": "An exhaustive, production-grade PostgreSQL DBA & backend engineering masterclass.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/postgres.test.mjs"
+  },
+  "keywords": [
+    "postgresql",
+    "postgres",
+    "sql",
+    "database",
+    "mvcc",
+    "jsonb",
+    "dba",
+    "backend"
+  ],
+  "author": "Manthan Ank",
+  "license": "MIT"
+}
