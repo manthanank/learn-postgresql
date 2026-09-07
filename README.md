@@ -1003,3 +1003,130 @@ Contributions are welcome! Please review our [CONTRIBUTING.md](CONTRIBUTING.md) 
 
 ## 📄 License
 This project is open-source software licensed under the [MIT License](LICENSE).
+
+
+
+### Complete PostgreSQL Advanced Production Code Examples
+
+#### 1. Window Functions: Analytical Partitioning & Running Totals
+Calculate intra-partition rankings, running aggregates, and month-over-month growth without expensive self-joins:
+
+```sql
+SELECT 
+  employee_id,
+  department_id,
+  salary,
+  -- 1. Sequential row counter within department
+  ROW_NUMBER() OVER (PARTITION BY department_id ORDER BY salary DESC) AS row_num,
+  -- 2. Rank with ties leaving gaps (1, 2, 2, 4)
+  RANK() OVER (PARTITION BY department_id ORDER BY salary DESC) AS rank_with_gaps,
+  -- 3. Rank without gaps (1, 2, 2, 3)
+  DENSE_RANK() OVER (PARTITION BY department_id ORDER BY salary DESC) AS dense_rank_continuous,
+  -- 4. Running department payroll total
+  SUM(salary) OVER (
+    PARTITION BY department_id 
+    ORDER BY salary DESC 
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS cumulative_dept_salary,
+  -- 5. Value from previous row (for period-over-period difference)
+  LAG(salary, 1, 0) OVER (PARTITION BY department_id ORDER BY hire_date) AS prev_employee_salary
+FROM employees;
+```
+
+---
+
+#### 2. Recursive CTE: Hierarchical Organization Tree Traversal with Cycle Detection
+Traverses nested parent-child trees (managers, nested comments, category graphs) to arbitrary depth:
+
+```sql
+WITH RECURSIVE org_hierarchy AS (
+  -- Anchor Member: Root executives who have no manager (manager_id IS NULL)
+  SELECT 
+    id, 
+    name, 
+    manager_id, 
+    1 AS hierarchy_level,
+    ARRAY[id] AS path
+  FROM employees
+  WHERE manager_id IS NULL
+
+  UNION ALL
+
+  -- Recursive Member: Subordinates joining to parent in previous iteration
+  SELECT 
+    e.id, 
+    e.name, 
+    e.manager_id, 
+    oh.hierarchy_level + 1,
+    oh.path || e.id
+  FROM employees e
+  JOIN org_hierarchy oh ON e.manager_id = oh.id
+  -- Prevent infinite recursion cycles
+  WHERE NOT (e.id = ANY(oh.path))
+)
+SELECT 
+  hierarchy_level,
+  REPEAT('  ', hierarchy_level - 1) || name AS formatted_hierarchy,
+  path
+FROM org_hierarchy
+ORDER BY path;
+```
+
+---
+
+#### 3. JSONB Power Operations & GIN Index Optimization
+Query, update, and search nested semi-structured documents at native relational speeds:
+
+```sql
+-- 1. Create table with semi-structured JSONB payload
+CREATE TABLE customer_events (
+  id BIGSERIAL PRIMARY KEY,
+  customer_id UUID NOT NULL,
+  metadata JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Create specialized GIN index with jsonb_path_ops for lightning fast @> containment searches
+CREATE INDEX idx_events_metadata_gin ON customer_events USING gin (metadata jsonb_path_ops);
+
+-- 3. Query records where client OS is Linux and purchase was completed (uses GIN index)
+SELECT id, customer_id, metadata->'device'->>'browser' AS browser
+FROM customer_events
+WHERE metadata @> '{"device": {"os": "Linux"}, "event": "checkout_completed"}';
+
+-- 4. Atomic In-Place JSONB Modification (update nested version flag and delete tracking token)
+UPDATE customer_events
+SET metadata = jsonb_set(metadata, '{app_version}', '"2.4.0"') - 'tracking_token'
+WHERE id = 42;
+
+-- 5. JSON Path Query (Extract all cart items priced over $50)
+SELECT 
+  id,
+  jsonb_path_query(metadata, '$.cart.items[*] ? (@.price > 50)') AS expensive_item
+FROM customer_events;
+```
+
+---
+
+#### 4. Zero-Downtime Schema Migrations & Covering Indexes
+Perform non-blocking index additions and index-only scans on multi-terabyte tables:
+
+```sql
+-- 1. Create index without acquiring ACCESS EXCLUSIVE write locks
+-- Allows continuous reads and writes during index compilation
+CREATE INDEX CONCURRENTLY idx_users_email_verified 
+ON users (email) 
+WHERE is_verified = TRUE;
+
+-- 2. Covering Index using INCLUDE: Enables Index-Only Scan (skips Heap lookup)
+CREATE INDEX idx_orders_customer_covering 
+ON orders (customer_id, order_date DESC) 
+INCLUDE (total_amount, status);
+
+-- The following query reads 100% of data directly from index B-Tree without touching table heap:
+EXPLAIN ANALYZE
+SELECT customer_id, order_date, total_amount, status
+FROM orders
+WHERE customer_id = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'
+ORDER BY order_date DESC;
+```
